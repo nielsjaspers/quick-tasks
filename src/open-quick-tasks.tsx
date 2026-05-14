@@ -26,6 +26,8 @@ type Preferences = {
   sortOrder?: "newest" | "oldest";
 };
 
+type TaskView = "open" | "history";
+
 const execFileAsync = promisify(execFile);
 const helperPath = join(environment.assetsPath, "quick-tasks-helper");
 const preferences = getPreferenceValues<Preferences>();
@@ -67,13 +69,15 @@ async function runHelper(args: string[]): Promise<string> {
   return stdout.trim();
 }
 
-async function fetchOpenReminders(
+async function fetchReminders(
+  view: TaskView,
   sortOrder: "newest" | "oldest",
 ): Promise<Reminder[]> {
+  const command = view === "history" ? "history" : "list";
   const output = await runHelper(
     defaultListName
-      ? ["list", defaultListName, sortOrder]
-      : ["list", sortOrder],
+      ? [command, defaultListName, sortOrder]
+      : [command, sortOrder],
   );
   return JSON.parse(output || "[]") as Reminder[];
 }
@@ -86,6 +90,10 @@ async function createReminder(title: string): Promise<void> {
 
 async function completeReminder(id: string): Promise<void> {
   await runHelper(["complete", id]);
+}
+
+async function uncompleteReminder(id: string): Promise<void> {
+  await runHelper(["uncomplete", id]);
 }
 
 async function editReminder(id: string, title: string): Promise<void> {
@@ -164,14 +172,16 @@ export default function Command() {
   const [sortOrder, setSortOrder] = useState<"newest" | "oldest">(
     defaultSortOrder,
   );
+  const [taskView, setTaskView] = useState<TaskView>("open");
   const [error, setError] = useState<string>();
 
   const hasComposerText = searchText.trim().length > 0;
+  const isHistoryMode = taskView === "history";
 
   const refresh = useCallback(async () => {
     setIsLoading(true);
     try {
-      const openReminders = await fetchOpenReminders(sortOrder);
+      const openReminders = await fetchReminders(taskView, sortOrder);
       setReminders(openReminders);
       setError(undefined);
       setSelectedItemId((currentId) => {
@@ -195,7 +205,7 @@ export default function Command() {
     } finally {
       setIsLoading(false);
     }
-  }, [sortOrder]);
+  }, [sortOrder, taskView]);
 
   useEffect(() => {
     void refresh();
@@ -216,7 +226,7 @@ export default function Command() {
   }, []);
 
   const visibleReminders = useMemo(() => {
-    if (!isSearchMode || !hasComposerText) {
+    if ((!isSearchMode && !isHistoryMode) || !hasComposerText) {
       return reminders;
     }
 
@@ -224,7 +234,7 @@ export default function Command() {
     return reminders.filter((reminder) =>
       reminder.title.toLowerCase().includes(normalizedQuery),
     );
-  }, [hasComposerText, isSearchMode, reminders, searchText]);
+  }, [hasComposerText, isHistoryMode, isSearchMode, reminders, searchText]);
 
   const createFromComposer = useCallback(async () => {
     if (!hasComposerText || isMutating) {
@@ -276,6 +286,33 @@ export default function Command() {
     [isMutating, isSearchMode, refresh],
   );
 
+  const uncompleteSelected = useCallback(
+    async (id: string) => {
+      if (isMutating) {
+        return;
+      }
+
+      setIsMutating(true);
+      try {
+        await uncompleteReminder(id);
+        setReminders((currentReminders) =>
+          currentReminders.filter((reminder) => reminder.id !== id),
+        );
+        setSearchText("");
+        await refresh();
+      } catch (caughtError) {
+        const message = reminderErrorMessage(
+          caughtError,
+          "Could not restore the reminder.",
+        );
+        await showToast({ style: Toast.Style.Failure, title: message });
+      } finally {
+        setIsMutating(false);
+      }
+    },
+    [isMutating, refresh],
+  );
+
   const selectedReminder = visibleReminders.find(
     (reminder) => reminder.id === selectedItemId,
   );
@@ -296,6 +333,14 @@ export default function Command() {
     />
   ) : undefined;
 
+  const restoreAction = selectedReminder ? (
+    <Action
+      title="Restore Task"
+      icon={Icon.ArrowCounterClockwise}
+      onAction={() => uncompleteSelected(selectedReminder.id)}
+    />
+  ) : undefined;
+
   const toggleSearchAction = (
     <Action
       title={isSearchMode ? "Use Composer" : "Search Tasks"}
@@ -303,6 +348,20 @@ export default function Command() {
       shortcut={{ modifiers: ["cmd"], key: "f" }}
       onAction={() => {
         setIsSearchMode((currentMode) => !currentMode);
+        setSearchText("");
+      }}
+    />
+  );
+
+  const toggleHistoryAction = (
+    <Action
+      title={isHistoryMode ? "Show Open Tasks" : "Show History"}
+      icon={isHistoryMode ? Icon.List : Icon.Clock}
+      shortcut={{ modifiers: ["cmd"], key: "y" }}
+      onAction={() => {
+        setTaskView((currentView) =>
+          currentView === "open" ? "history" : "open",
+        );
         setSearchText("");
       }}
     />
@@ -336,7 +395,13 @@ export default function Command() {
   return (
     <List
       isLoading={isLoading || isMutating}
-      searchBarPlaceholder={isSearchMode ? "Search tasks..." : "Add a task..."}
+      searchBarPlaceholder={
+        isHistoryMode
+          ? "Search completed tasks..."
+          : isSearchMode
+            ? "Search tasks..."
+            : "Add a task..."
+      }
       searchText={searchText}
       selectedItemId={selectedItemId}
       onSearchTextChange={setSearchText}
@@ -344,10 +409,19 @@ export default function Command() {
       filtering={false}
       actions={
         <ActionPanel>
-          {isSearchMode ? completeAction : createAction}
-          {isSearchMode ? createAction : completeAction}
+          {isHistoryMode
+            ? restoreAction
+            : isSearchMode
+              ? completeAction
+              : createAction}
+          {isHistoryMode
+            ? undefined
+            : isSearchMode
+              ? createAction
+              : completeAction}
+          {toggleHistoryAction}
           {toggleSortOrderAction}
-          {toggleSearchAction}
+          {!isHistoryMode ? toggleSearchAction : undefined}
         </ActionPanel>
       }
     >
@@ -359,10 +433,16 @@ export default function Command() {
             key={reminder.id}
             id={reminder.id}
             title={reminder.title}
-            icon={Icon.Circle}
+            icon={isHistoryMode ? Icon.CheckCircle : Icon.Circle}
             actions={
               <ActionPanel>
-                {isSearchMode || !hasComposerText ? (
+                {isHistoryMode ? (
+                  <Action
+                    title="Restore Task"
+                    icon={Icon.ArrowCounterClockwise}
+                    onAction={() => uncompleteSelected(reminder.id)}
+                  />
+                ) : isSearchMode || !hasComposerText ? (
                   <Action
                     title="Complete Task"
                     icon={Icon.CheckCircle}
@@ -371,7 +451,7 @@ export default function Command() {
                 ) : (
                   createAction
                 )}
-                {isSearchMode ? (
+                {isHistoryMode ? undefined : isSearchMode ? (
                   createAction
                 ) : hasComposerText ? (
                   <Action
@@ -381,8 +461,9 @@ export default function Command() {
                   />
                 ) : undefined}
                 {editAction(reminder)}
+                {toggleHistoryAction}
                 {toggleSortOrderAction}
-                {toggleSearchAction}
+                {!isHistoryMode ? toggleSearchAction : undefined}
               </ActionPanel>
             }
           />

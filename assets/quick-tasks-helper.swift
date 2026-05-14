@@ -94,11 +94,34 @@ func incompleteReminders(listName: String?) throws -> [EKReminder] {
   return fetchedReminders ?? []
 }
 
-func listReminders(listName: String?, sortOrder: SortOrder) throws {
-  let reminders = try incompleteReminders(listName: listName)
+func completedReminders(listName: String?) throws -> [EKReminder] {
+  try requestRemindersAccess()
+
+  let calendar = try reminderCalendar(named: listName)
+  let predicate = store.predicateForCompletedReminders(
+    withCompletionDateStarting: nil,
+    ending: nil,
+    calendars: [calendar]
+  )
+
+  let semaphore = DispatchSemaphore(value: 0)
+  var fetchedReminders: [EKReminder]?
+
+  store.fetchReminders(matching: predicate) { reminders in
+    fetchedReminders = reminders
+    semaphore.signal()
+  }
+
+  semaphore.wait()
+
+  return fetchedReminders ?? []
+}
+
+func listReminders(listName: String?, sortOrder: SortOrder, completed: Bool) throws {
+  let reminders = try (completed ? completedReminders(listName: listName) : incompleteReminders(listName: listName))
     .sorted { first, second in
-      let firstDate = first.creationDate ?? Date.distantPast
-      let secondDate = second.creationDate ?? Date.distantPast
+      let firstDate = (completed ? first.completionDate : first.creationDate) ?? first.creationDate ?? Date.distantPast
+      let secondDate = (completed ? second.completionDate : second.creationDate) ?? second.creationDate ?? Date.distantPast
 
       switch sortOrder {
       case .newest:
@@ -154,6 +177,17 @@ func completeReminder(id: String) throws {
   try store.save(reminder, commit: true)
 }
 
+func uncompleteReminder(id: String) throws {
+  try requestRemindersAccess()
+
+  guard let reminder = store.calendarItem(withIdentifier: id) as? EKReminder else {
+    throw QuickTasksError.reminderNotFound
+  }
+
+  reminder.isCompleted = false
+  try store.save(reminder, commit: true)
+}
+
 func editReminder(id: String, title: String) throws {
   try requestRemindersAccess()
 
@@ -175,7 +209,10 @@ do {
   switch arguments[1] {
   case "list":
     let (listName, sortOrder) = listArguments(arguments)
-    try listReminders(listName: listName, sortOrder: sortOrder)
+    try listReminders(listName: listName, sortOrder: sortOrder, completed: false)
+  case "history":
+    let (listName, sortOrder) = listArguments(arguments)
+    try listReminders(listName: listName, sortOrder: sortOrder, completed: true)
   case "add":
     guard arguments.count >= 3 else {
       throw QuickTasksError.missingTitle
@@ -187,6 +224,11 @@ do {
       throw QuickTasksError.missingIdentifier
     }
     try completeReminder(id: arguments[2])
+  case "uncomplete":
+    guard arguments.count >= 3 else {
+      throw QuickTasksError.missingIdentifier
+    }
+    try uncompleteReminder(id: arguments[2])
   case "edit":
     guard arguments.count >= 4 else {
       throw QuickTasksError.missingTitle
