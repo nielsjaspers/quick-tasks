@@ -1,4 +1,5 @@
 import {
+  AI,
   Action,
   ActionPanel,
   environment,
@@ -34,6 +35,7 @@ const preferences = getPreferenceValues<Preferences>();
 const defaultListName = preferences.defaultListName?.trim();
 const defaultSortOrder = preferences.sortOrder ?? "newest";
 const SORT_ORDER_STORAGE_KEY = "sortOrder";
+const AI_TASK_PREFIX_PATTERN = /^@(ai|agent)\s+/i;
 
 function isSortOrder(value: unknown): value is "newest" | "oldest" {
   return value === "newest" || value === "oldest";
@@ -88,6 +90,14 @@ async function createReminder(title: string): Promise<void> {
   );
 }
 
+async function createReminders(titles: string[]): Promise<void> {
+  if (titles.length === 0) {
+    throw new Error("No tasks found");
+  }
+
+  await Promise.all(titles.map((title) => createReminder(title)));
+}
+
 async function completeReminder(id: string): Promise<void> {
   await runHelper(["complete", id]);
 }
@@ -98,6 +108,44 @@ async function uncompleteReminder(id: string): Promise<void> {
 
 async function editReminder(id: string, title: string): Promise<void> {
   await runHelper(["edit", id, title]);
+}
+
+function parseExtractedTasks(response: string): string[] {
+  try {
+    const parsed = JSON.parse(response) as unknown;
+
+    if (Array.isArray(parsed)) {
+      return parsed
+        .filter((task): task is string => typeof task === "string")
+        .map((task) => task.trim())
+        .filter(Boolean);
+    }
+  } catch {
+    // Fall back to line parsing below.
+  }
+
+  return response
+    .split("\n")
+    .map((line) => line.replace(/^[-*\d.\s]+/, "").trim())
+    .filter(Boolean);
+}
+
+async function extractTasksWithAI(input: string): Promise<string[]> {
+  const request = input.replace(AI_TASK_PREFIX_PATTERN, "").trim();
+
+  const response = await AI.ask(
+    [
+      "Extract plain task titles from this text.",
+      "Return only a JSON array of strings.",
+      "Do not include due dates, notes, tags, priorities, or explanations.",
+      "Keep each task short and actionable.",
+      "",
+      request,
+    ].join("\n"),
+    { creativity: 0 },
+  );
+
+  return parseExtractedTasks(response);
 }
 
 type EditTaskFormValues = {
@@ -176,6 +224,7 @@ export default function Command() {
   const [error, setError] = useState<string>();
 
   const hasComposerText = searchText.trim().length > 0;
+  const isAIComposerText = AI_TASK_PREFIX_PATTERN.test(searchText);
   const isHistoryMode = taskView === "history";
 
   const refresh = useCallback(async () => {
@@ -243,7 +292,12 @@ export default function Command() {
 
     setIsMutating(true);
     try {
-      await createReminder(searchText);
+      if (AI_TASK_PREFIX_PATTERN.test(searchText)) {
+        const taskTitles = await extractTasksWithAI(searchText);
+        await createReminders(taskTitles);
+      } else {
+        await createReminder(searchText);
+      }
       setSearchText("");
       await refresh();
     } catch (caughtError) {
@@ -319,8 +373,8 @@ export default function Command() {
 
   const createAction = hasComposerText ? (
     <Action
-      title="Create Task"
-      icon={Icon.Plus}
+      title={isAIComposerText ? "Extract Tasks with AI" : "Create Task"}
+      icon={isAIComposerText ? Icon.Stars : Icon.Plus}
       onAction={createFromComposer}
     />
   ) : undefined;
@@ -363,6 +417,23 @@ export default function Command() {
           currentView === "open" ? "history" : "open",
         );
         setSearchText("");
+      }}
+    />
+  );
+
+  const insertAIPrefixAction = (
+    <Action
+      title="Use AI Task Extraction"
+      icon={Icon.Stars}
+      shortcut={{ modifiers: ["cmd"], key: "i" }}
+      onAction={() => {
+        setSearchText((currentText) => {
+          if (AI_TASK_PREFIX_PATTERN.test(currentText)) {
+            return currentText;
+          }
+
+          return currentText ? `@ai ${currentText}` : "@ai ";
+        });
       }}
     />
   );
@@ -419,6 +490,7 @@ export default function Command() {
             : isSearchMode
               ? createAction
               : completeAction}
+          {!isHistoryMode ? insertAIPrefixAction : undefined}
           {toggleHistoryAction}
           {toggleSortOrderAction}
           {!isHistoryMode ? toggleSearchAction : undefined}
@@ -428,46 +500,55 @@ export default function Command() {
       {error ? (
         <List.EmptyView title={error} />
       ) : (
-        visibleReminders.map((reminder) => (
-          <List.Item
-            key={reminder.id}
-            id={reminder.id}
-            title={reminder.title}
-            icon={isHistoryMode ? Icon.CheckCircle : Icon.Circle}
-            actions={
-              <ActionPanel>
-                {isHistoryMode ? (
-                  <Action
-                    title="Restore Task"
-                    icon={Icon.ArrowCounterClockwise}
-                    onAction={() => uncompleteSelected(reminder.id)}
-                  />
-                ) : isSearchMode || !hasComposerText ? (
-                  <Action
-                    title="Complete Task"
-                    icon={Icon.CheckCircle}
-                    onAction={() => completeSelected(reminder.id)}
-                  />
-                ) : (
-                  createAction
-                )}
-                {isHistoryMode ? undefined : isSearchMode ? (
-                  createAction
-                ) : hasComposerText ? (
-                  <Action
-                    title="Complete Selected Task"
-                    icon={Icon.CheckCircle}
-                    onAction={() => completeSelected(reminder.id)}
-                  />
-                ) : undefined}
-                {editAction(reminder)}
-                {toggleHistoryAction}
-                {toggleSortOrderAction}
-                {!isHistoryMode ? toggleSearchAction : undefined}
-              </ActionPanel>
-            }
-          />
-        ))
+        <List.Section
+          title={
+            isAIComposerText
+              ? "AI will split this text into plain tasks when you press Enter"
+              : undefined
+          }
+        >
+          {visibleReminders.map((reminder) => (
+            <List.Item
+              key={reminder.id}
+              id={reminder.id}
+              title={reminder.title}
+              icon={isHistoryMode ? Icon.CheckCircle : Icon.Circle}
+              actions={
+                <ActionPanel>
+                  {isHistoryMode ? (
+                    <Action
+                      title="Restore Task"
+                      icon={Icon.ArrowCounterClockwise}
+                      onAction={() => uncompleteSelected(reminder.id)}
+                    />
+                  ) : isSearchMode || !hasComposerText ? (
+                    <Action
+                      title="Complete Task"
+                      icon={Icon.CheckCircle}
+                      onAction={() => completeSelected(reminder.id)}
+                    />
+                  ) : (
+                    createAction
+                  )}
+                  {isHistoryMode ? undefined : isSearchMode ? (
+                    createAction
+                  ) : hasComposerText ? (
+                    <Action
+                      title="Complete Selected Task"
+                      icon={Icon.CheckCircle}
+                      onAction={() => completeSelected(reminder.id)}
+                    />
+                  ) : undefined}
+                  {editAction(reminder)}
+                  {!isHistoryMode ? insertAIPrefixAction : undefined}
+                  {toggleHistoryAction}
+                  {toggleSortOrderAction}
+                  {!isHistoryMode ? toggleSearchAction : undefined}
+                </ActionPanel>
+              }
+            />
+          ))}
+        </List.Section>
       )}
     </List>
   );
