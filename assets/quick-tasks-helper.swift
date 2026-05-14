@@ -1,14 +1,22 @@
 import EventKit
 import Foundation
+import PDFKit
+import Vision
+#if canImport(AppKit)
+import AppKit
+#endif
 
 enum QuickTasksError: Error {
   case missingCommand
   case missingTitle
   case missingIdentifier
+  case missingFilePath
+  case unsupportedFileType(String)
   case remindersAccessDenied
   case noDefaultList
   case listNotFound(String)
   case reminderNotFound
+  case textExtractionFailed
 }
 
 struct ReminderOutput: Encodable {
@@ -209,6 +217,115 @@ func editReminder(id: String, title: String) throws {
   try store.save(reminder, commit: true)
 }
 
+func textFromPlainFile(url: URL) throws -> String {
+  return try String(contentsOf: url, encoding: .utf8)
+}
+
+func textFromHTML(url: URL) throws -> String {
+  let data = try Data(contentsOf: url)
+  let attributedString = try NSAttributedString(
+    data: data,
+    options: [
+      .documentType: NSAttributedString.DocumentType.html,
+      .characterEncoding: String.Encoding.utf8.rawValue
+    ],
+    documentAttributes: nil
+  )
+
+  return attributedString.string
+}
+
+func recognizedText(cgImage: CGImage) throws -> String {
+#if canImport(AppKit)
+  let request = VNRecognizeTextRequest()
+  request.recognitionLevel = .accurate
+  request.usesLanguageCorrection = true
+
+  let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+  try handler.perform([request])
+
+  return (request.results ?? [])
+    .compactMap { $0.topCandidates(1).first?.string }
+    .joined(separator: "\n")
+#else
+  throw QuickTasksError.textExtractionFailed
+#endif
+}
+
+func cgImage(from image: NSImage) throws -> CGImage {
+  guard
+    let tiffData = image.tiffRepresentation,
+    let bitmap = NSBitmapImageRep(data: tiffData),
+    let cgImage = bitmap.cgImage
+  else {
+    throw QuickTasksError.textExtractionFailed
+  }
+
+  return cgImage
+}
+
+func textFromPDF(url: URL) throws -> String {
+  guard let document = PDFDocument(url: url) else {
+    throw QuickTasksError.textExtractionFailed
+  }
+
+  var pageTexts: [String] = []
+
+  for pageIndex in 0..<document.pageCount {
+    guard let page = document.page(at: pageIndex) else {
+      continue
+    }
+
+    if let pageText = page.string?.trimmingCharacters(in: .whitespacesAndNewlines), !pageText.isEmpty {
+      pageTexts.append(pageText)
+      continue
+    }
+
+    let thumbnail = page.thumbnail(of: CGSize(width: 1800, height: 2400), for: .mediaBox)
+    let ocrText = try recognizedText(cgImage: cgImage(from: thumbnail))
+
+    if !ocrText.isEmpty {
+      pageTexts.append(ocrText)
+    }
+  }
+
+  return pageTexts.joined(separator: "\n\n")
+}
+
+func textFromImage(url: URL) throws -> String {
+  guard let image = NSImage(contentsOf: url) else {
+    throw QuickTasksError.textExtractionFailed
+  }
+
+  return try recognizedText(cgImage: cgImage(from: image))
+}
+
+func extractText(filePath: String) throws {
+  let url = URL(fileURLWithPath: filePath)
+  let fileExtension = url.pathExtension.lowercased()
+  let plainTextExtensions = Set([
+    "txt", "md", "markdown", "csv", "tsv", "json", "xml", "rtf", "log"
+  ])
+  let htmlExtensions = Set(["html", "htm"])
+  let imageExtensions = Set(["png", "jpg", "jpeg", "heic", "tif", "tiff", "bmp", "gif"])
+
+  let text: String
+
+  if plainTextExtensions.contains(fileExtension) {
+    text = try textFromPlainFile(url: url)
+  } else if htmlExtensions.contains(fileExtension) {
+    text = try textFromHTML(url: url)
+  } else if fileExtension == "pdf" {
+    text = try textFromPDF(url: url)
+  } else if imageExtensions.contains(fileExtension) {
+    text = try textFromImage(url: url)
+  } else {
+    throw QuickTasksError.unsupportedFileType(fileExtension)
+  }
+
+  print(text)
+}
+
 do {
   let arguments = CommandLine.arguments
 
@@ -244,6 +361,11 @@ do {
       throw QuickTasksError.missingTitle
     }
     try editReminder(id: arguments[2], title: arguments[3])
+  case "extract-text":
+    guard arguments.count >= 3 else {
+      throw QuickTasksError.missingFilePath
+    }
+    try extractText(filePath: arguments[2])
   default:
     throw QuickTasksError.missingCommand
   }

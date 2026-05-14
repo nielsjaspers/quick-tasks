@@ -68,6 +68,14 @@ function reminderErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+function errorText(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
+}
+
 async function runHelper(args: string[]): Promise<string> {
   const { stdout } = await execFileAsync(helperPath, args);
   return stdout.trim();
@@ -132,6 +140,29 @@ async function createReminders(titles: string[]): Promise<void> {
   await Promise.all(titles.map((title) => createReminder(title)));
 }
 
+function documentExtractionErrorMessage(error: unknown): string {
+  const text = errorText(error);
+  const lowerText = text.toLowerCase();
+
+  if (remindersAccessError(error) || remindersListNotFoundError(error)) {
+    return reminderErrorMessage(error, "Could not create extracted tasks.");
+  }
+
+  if (lowerText.includes("unsupportedfiletype")) {
+    return "That file type is not supported yet.";
+  }
+
+  if (lowerText.includes("textextractionfailed")) {
+    return "Could not read text from that document.";
+  }
+
+  if (lowerText.includes("no tasks found")) {
+    return "No tasks were found in that document.";
+  }
+
+  return `Could not extract tasks from that document: ${text}`;
+}
+
 async function completeReminder(id: string): Promise<void> {
   await runHelper(["complete", id]);
 }
@@ -186,6 +217,15 @@ type EditTaskFormValues = {
   title: string;
 };
 
+type DocumentTaskFormValues = {
+  files: string[];
+  context?: string;
+};
+
+async function extractTextFromDocument(filePath: string): Promise<string> {
+  return runHelper(["extract-text", filePath]);
+}
+
 function EditTaskForm({
   reminder,
   onEdited,
@@ -239,6 +279,80 @@ function EditTaskForm({
         value={title}
         onChange={setTitle}
         autoFocus
+      />
+    </Form>
+  );
+}
+
+function DocumentTaskForm({ onCreated }: { onCreated: () => Promise<void> }) {
+  const { pop } = useNavigation();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  async function submit(values: DocumentTaskFormValues) {
+    const filePath = values.files[0];
+
+    if (!filePath || isSubmitting) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const documentText = await extractTextFromDocument(filePath);
+      const response = await AI.ask(
+        [
+          "Extract plain task titles from this document.",
+          "Include tasks, deadlines, action items, things to prepare, things to submit, and follow-ups.",
+          "Return only a JSON array of strings.",
+          "Do not include explanations.",
+          "Do not create due date metadata. If a deadline matters, include it in the task title.",
+          "Keep each task short and actionable.",
+          "",
+          values.context?.trim()
+            ? `User context:\n${values.context.trim()}\n`
+            : "",
+          `Document text:\n${documentText}`,
+        ].join("\n"),
+        { creativity: 0 },
+      );
+      const taskTitles = parseExtractedTasks(response);
+      await createReminders(taskTitles);
+      await onCreated();
+      await showToast({
+        style: Toast.Style.Success,
+        title: `Created ${taskTitles.length} task${taskTitles.length === 1 ? "" : "s"}`,
+      });
+      pop();
+    } catch (caughtError) {
+      const message = documentExtractionErrorMessage(caughtError);
+      await showToast({ style: Toast.Style.Failure, title: message });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <Form
+      isLoading={isSubmitting}
+      actions={
+        <ActionPanel>
+          <Action.SubmitForm
+            title="Extract Tasks"
+            icon={Icon.Stars}
+            onSubmit={submit}
+          />
+        </ActionPanel>
+      }
+    >
+      <Form.FilePicker
+        id="files"
+        title="Document"
+        allowMultipleSelection={false}
+        canChooseDirectories={false}
+      />
+      <Form.TextArea
+        id="context"
+        title="Context"
+        placeholder="What should the model look for? Any project, course, or deadline context helps."
       />
     </Form>
   );
@@ -508,6 +622,14 @@ export default function Command() {
     />
   );
 
+  const extractDocumentTasksAction = (
+    <Action.Push
+      title="Extract Tasks from Document"
+      icon={Icon.Document}
+      target={<DocumentTaskForm onCreated={refresh} />}
+    />
+  );
+
   const toggleSortOrderAction = (
     <Action
       title={sortOrder === "newest" ? "Sort Oldest First" : "Sort Newest First"}
@@ -561,6 +683,7 @@ export default function Command() {
               ? createAction
               : completeAction}
           {!isHistoryMode ? insertAIPrefixAction : undefined}
+          {!isHistoryMode ? extractDocumentTasksAction : undefined}
           {toggleHistoryAction}
           {toggleSortOrderAction}
           {!isHistoryMode ? toggleSearchAction : undefined}
@@ -611,6 +734,7 @@ export default function Command() {
                   ) : undefined}
                   {editAction(reminder)}
                   {!isHistoryMode ? insertAIPrefixAction : undefined}
+                  {!isHistoryMode ? extractDocumentTasksAction : undefined}
                   {toggleHistoryAction}
                   {toggleSortOrderAction}
                   {!isHistoryMode ? toggleSearchAction : undefined}
