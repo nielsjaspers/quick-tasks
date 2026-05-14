@@ -80,6 +80,7 @@ export default function Command() {
   const [selectedItemId, setSelectedItemId] = useState<string | undefined>();
   const [isLoading, setIsLoading] = useState(true);
   const [isMutating, setIsMutating] = useState(false);
+  const [isSearchMode, setIsSearchMode] = useState(false);
   const [error, setError] = useState<string>();
 
   const hasComposerText = searchText.trim().length > 0;
@@ -118,7 +119,7 @@ export default function Command() {
   }, [refresh]);
 
   const visibleReminders = useMemo(() => {
-    if (!hasComposerText) {
+    if (!isSearchMode || !hasComposerText) {
       return reminders;
     }
 
@@ -126,7 +127,7 @@ export default function Command() {
     return reminders.filter((reminder) =>
       reminder.title.toLowerCase().includes(normalizedQuery),
     );
-  }, [hasComposerText, reminders, searchText]);
+  }, [hasComposerText, isSearchMode, reminders, searchText]);
 
   const createFromComposer = useCallback(async () => {
     if (!hasComposerText || isMutating) {
@@ -175,7 +176,11 @@ export default function Command() {
     [isMutating, refresh],
   );
 
-  const primaryAction = hasComposerText ? (
+  const selectedReminder = visibleReminders.find(
+    (reminder) => reminder.id === selectedItemId,
+  );
+
+  const createAction = hasComposerText ? (
     <Action
       title="Create Task"
       icon={Icon.Plus}
@@ -183,17 +188,41 @@ export default function Command() {
     />
   ) : undefined;
 
+  const completeAction = selectedReminder ? (
+    <Action
+      title="Complete Task"
+      icon={Icon.CheckCircle}
+      onAction={() => completeSelected(selectedReminder.id)}
+    />
+  ) : undefined;
+
+  const toggleSearchAction = (
+    <Action
+      title={isSearchMode ? "Use Composer" : "Search Tasks"}
+      icon={Icon.MagnifyingGlass}
+      shortcut={{ modifiers: ["cmd"], key: "f" }}
+      onAction={() => {
+        setIsSearchMode((currentMode) => !currentMode);
+        setSearchText("");
+      }}
+    />
+  );
+
   return (
     <List
       isLoading={isLoading || isMutating}
-      searchBarPlaceholder="Add a task..."
+      searchBarPlaceholder={isSearchMode ? "Search tasks..." : "Add a task..."}
       searchText={searchText}
       selectedItemId={selectedItemId}
       onSearchTextChange={setSearchText}
       onSelectionChange={(id) => setSelectedItemId(id ?? undefined)}
       filtering={false}
       actions={
-        primaryAction ? <ActionPanel>{primaryAction}</ActionPanel> : undefined
+        <ActionPanel>
+          {isSearchMode ? completeAction : createAction}
+          {isSearchMode ? createAction : completeAction}
+          {toggleSearchAction}
+        </ActionPanel>
       }
     >
       {error ? (
@@ -207,13 +236,25 @@ export default function Command() {
             icon={Icon.Circle}
             actions={
               <ActionPanel>
-                {primaryAction ?? (
+                {isSearchMode ? (
+                  <Action
+                    title="Complete Task"
+                    icon={Icon.CheckCircle}
+                    onAction={() => completeSelected(reminder.id)}
+                  />
+                ) : (
+                  createAction
+                )}
+                {isSearchMode ? (
+                  createAction
+                ) : (
                   <Action
                     title="Complete Task"
                     icon={Icon.CheckCircle}
                     onAction={() => completeSelected(reminder.id)}
                   />
                 )}
+                {toggleSearchAction}
               </ActionPanel>
             }
           />
