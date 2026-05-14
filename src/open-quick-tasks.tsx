@@ -20,6 +20,7 @@ import { promisify } from "util";
 type Reminder = {
   id: string;
   title: string;
+  sortKey: number;
 };
 
 type Preferences = {
@@ -35,6 +36,7 @@ const preferences = getPreferenceValues<Preferences>();
 const defaultListName = preferences.defaultListName?.trim();
 const defaultSortOrder = preferences.sortOrder ?? "newest";
 const SORT_ORDER_STORAGE_KEY = "sortOrder";
+const REMINDERS_CACHE_KEY_PREFIX = "remindersCache";
 const AI_TASK_PREFIX_PATTERN = /^@(ai|agent)\s+/i;
 
 function isSortOrder(value: unknown): value is "newest" | "oldest" {
@@ -71,15 +73,47 @@ async function runHelper(args: string[]): Promise<string> {
   return stdout.trim();
 }
 
-async function fetchReminders(
-  view: TaskView,
-  sortOrder: "newest" | "oldest",
-): Promise<Reminder[]> {
+function remindersCacheKey(view: TaskView): string {
+  return [REMINDERS_CACHE_KEY_PREFIX, defaultListName || "default", view].join(
+    ":",
+  );
+}
+
+function parseReminders(value: string | undefined): Reminder[] | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+
+    if (!Array.isArray(parsed)) {
+      return undefined;
+    }
+
+    return parsed
+      .filter(
+        (reminder): reminder is Reminder =>
+          typeof reminder === "object" &&
+          reminder !== null &&
+          typeof (reminder as Reminder).id === "string" &&
+          typeof (reminder as Reminder).title === "string" &&
+          typeof (reminder as Reminder).sortKey === "number",
+      )
+      .map((reminder) => ({
+        id: reminder.id,
+        title: reminder.title,
+        sortKey: reminder.sortKey,
+      }));
+  } catch {
+    return undefined;
+  }
+}
+
+async function fetchReminders(view: TaskView): Promise<Reminder[]> {
   const command = view === "history" ? "history" : "list";
   const output = await runHelper(
-    defaultListName
-      ? [command, defaultListName, sortOrder]
-      : [command, sortOrder],
+    defaultListName ? [command, defaultListName] : [command],
   );
   return JSON.parse(output || "[]") as Reminder[];
 }
@@ -227,38 +261,54 @@ export default function Command() {
   const isAIComposerText = AI_TASK_PREFIX_PATTERN.test(searchText);
   const isHistoryMode = taskView === "history";
 
-  const refresh = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const openReminders = await fetchReminders(taskView, sortOrder);
-      setReminders(openReminders);
-      setError(undefined);
-      setSelectedItemId((currentId) => {
-        if (
-          currentId &&
-          openReminders.some((reminder) => reminder.id === currentId)
-        ) {
-          return currentId;
-        }
+  const refresh = useCallback(
+    async (options?: { showLoading?: boolean }) => {
+      if (options?.showLoading ?? true) {
+        setIsLoading(true);
+      }
 
-        return openReminders[0]?.id;
-      });
-    } catch (caughtError) {
-      const message = reminderErrorMessage(
-        caughtError,
-        "Could not read Apple Reminders.",
-      );
-      setError(message);
-      setReminders([]);
-      await showToast({ style: Toast.Style.Failure, title: message });
-    } finally {
-      setIsLoading(false);
-    }
-  }, [sortOrder, taskView]);
+      try {
+        const openReminders = await fetchReminders(taskView);
+        setReminders(openReminders);
+        setError(undefined);
+        await LocalStorage.setItem(
+          remindersCacheKey(taskView),
+          JSON.stringify(openReminders),
+        );
+        setSelectedItemId(openReminders[0]?.id);
+      } catch (caughtError) {
+        const message = reminderErrorMessage(
+          caughtError,
+          "Could not read Apple Reminders.",
+        );
+        setError(message);
+        setReminders([]);
+        await showToast({ style: Toast.Style.Failure, title: message });
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [taskView],
+  );
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    async function loadCachedAndRefresh() {
+      const cachedReminders = parseReminders(
+        await LocalStorage.getItem<string>(remindersCacheKey(taskView)),
+      );
+
+      if (cachedReminders) {
+        setReminders(cachedReminders);
+        setError(undefined);
+        setIsLoading(false);
+        setSelectedItemId(cachedReminders[0]?.id);
+      }
+
+      await refresh({ showLoading: !cachedReminders });
+    }
+
+    void loadCachedAndRefresh();
+  }, [refresh, taskView]);
 
   useEffect(() => {
     async function loadStoredSortOrder() {
@@ -274,16 +324,36 @@ export default function Command() {
     void loadStoredSortOrder();
   }, []);
 
+  const orderedReminders = useMemo(() => {
+    return [...reminders].sort((firstReminder, secondReminder) => {
+      if (sortOrder === "newest") {
+        return secondReminder.sortKey - firstReminder.sortKey;
+      }
+
+      return firstReminder.sortKey - secondReminder.sortKey;
+    });
+  }, [reminders, sortOrder]);
+
   const visibleReminders = useMemo(() => {
     if ((!isSearchMode && !isHistoryMode) || !hasComposerText) {
-      return reminders;
+      return orderedReminders;
     }
 
     const normalizedQuery = searchText.toLowerCase();
-    return reminders.filter((reminder) =>
+    return orderedReminders.filter((reminder) =>
       reminder.title.toLowerCase().includes(normalizedQuery),
     );
-  }, [hasComposerText, isHistoryMode, isSearchMode, reminders, searchText]);
+  }, [
+    hasComposerText,
+    isHistoryMode,
+    isSearchMode,
+    orderedReminders,
+    searchText,
+  ]);
+
+  useEffect(() => {
+    setSelectedItemId(visibleReminders[0]?.id);
+  }, [visibleReminders]);
 
   const createFromComposer = useCallback(async () => {
     if (!hasComposerText || isMutating) {

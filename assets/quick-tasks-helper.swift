@@ -14,6 +14,7 @@ enum QuickTasksError: Error {
 struct ReminderOutput: Encodable {
   let id: String
   let title: String
+  let sortKey: Double
 }
 
 enum SortOrder: String {
@@ -117,21 +118,30 @@ func completedReminders(listName: String?) throws -> [EKReminder] {
   return fetchedReminders ?? []
 }
 
+func reminderSortKey(_ reminder: EKReminder, completed: Bool) -> Double {
+  let date = (completed ? reminder.completionDate : reminder.creationDate) ?? reminder.creationDate ?? Date.distantPast
+  return date.timeIntervalSince1970
+}
+
 func listReminders(listName: String?, sortOrder: SortOrder, completed: Bool) throws {
   let reminders = try (completed ? completedReminders(listName: listName) : incompleteReminders(listName: listName))
     .sorted { first, second in
-      let firstDate = (completed ? first.completionDate : first.creationDate) ?? first.creationDate ?? Date.distantPast
-      let secondDate = (completed ? second.completionDate : second.creationDate) ?? second.creationDate ?? Date.distantPast
+      let firstSortKey = reminderSortKey(first, completed: completed)
+      let secondSortKey = reminderSortKey(second, completed: completed)
 
       switch sortOrder {
       case .newest:
-        return firstDate > secondDate
+        return firstSortKey > secondSortKey
       case .oldest:
-        return firstDate < secondDate
+        return firstSortKey < secondSortKey
       }
     }
     .map { reminder in
-      ReminderOutput(id: reminder.calendarItemIdentifier, title: reminder.title ?? "")
+      ReminderOutput(
+        id: reminder.calendarItemIdentifier,
+        title: reminder.title ?? "",
+        sortKey: reminderSortKey(reminder, completed: completed)
+      )
     }
 
   let data = try JSONEncoder().encode(reminders)
