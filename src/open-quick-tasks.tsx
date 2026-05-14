@@ -29,7 +29,7 @@ const execFileAsync = promisify(execFile);
 const helperPath = join(environment.assetsPath, "quick-tasks-helper");
 const preferences = getPreferenceValues<Preferences>();
 const defaultListName = preferences.defaultListName?.trim();
-const sortOrder = preferences.sortOrder ?? "newest";
+const defaultSortOrder = preferences.sortOrder ?? "newest";
 
 function remindersAccessError(error: unknown): boolean {
   return (
@@ -61,7 +61,9 @@ async function runHelper(args: string[]): Promise<string> {
   return stdout.trim();
 }
 
-async function fetchOpenReminders(): Promise<Reminder[]> {
+async function fetchOpenReminders(
+  sortOrder: "newest" | "oldest",
+): Promise<Reminder[]> {
   const output = await runHelper(
     defaultListName
       ? ["list", defaultListName, sortOrder]
@@ -153,6 +155,9 @@ export default function Command() {
   const [isLoading, setIsLoading] = useState(true);
   const [isMutating, setIsMutating] = useState(false);
   const [isSearchMode, setIsSearchMode] = useState(false);
+  const [sortOrder, setSortOrder] = useState<"newest" | "oldest">(
+    defaultSortOrder,
+  );
   const [error, setError] = useState<string>();
 
   const hasComposerText = searchText.trim().length > 0;
@@ -160,7 +165,7 @@ export default function Command() {
   const refresh = useCallback(async () => {
     setIsLoading(true);
     try {
-      const openReminders = await fetchOpenReminders();
+      const openReminders = await fetchOpenReminders(sortOrder);
       setReminders(openReminders);
       setError(undefined);
       setSelectedItemId((currentId) => {
@@ -184,7 +189,7 @@ export default function Command() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [sortOrder]);
 
   useEffect(() => {
     void refresh();
@@ -283,6 +288,19 @@ export default function Command() {
     />
   );
 
+  const toggleSortOrderAction = (
+    <Action
+      title={sortOrder === "newest" ? "Sort Oldest First" : "Sort Newest First"}
+      icon={Icon.ArrowClockwise}
+      shortcut={{ modifiers: ["cmd"], key: "b" }}
+      onAction={() => {
+        setSortOrder((currentSortOrder) =>
+          currentSortOrder === "newest" ? "oldest" : "newest",
+        );
+      }}
+    />
+  );
+
   const editAction = (reminder: Reminder) => (
     <Action.Push
       title="Edit Task"
@@ -305,6 +323,7 @@ export default function Command() {
         <ActionPanel>
           {isSearchMode ? completeAction : createAction}
           {isSearchMode ? createAction : completeAction}
+          {toggleSortOrderAction}
           {toggleSearchAction}
         </ActionPanel>
       }
@@ -339,6 +358,7 @@ export default function Command() {
                   />
                 ) : undefined}
                 {editAction(reminder)}
+                {toggleSortOrderAction}
                 {toggleSearchAction}
               </ActionPanel>
             }
