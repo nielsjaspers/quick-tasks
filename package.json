@@ -1,0 +1,44 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "quick-tasks",
+  "description": "Just a quick interface for quick tasks using Apple Reminders",
+  "license": "MIT",
+  "scripts": {
+    "compile-helper": "swiftc assets/quick-tasks-helper.swift -o assets/quick-tasks-helper",
+    "dev": "bun run compile-helper && ray develop",
+    "lint": "ray lint",
+    "fix-lint": "ray lint --fix",
+    "build": "bun run compile-helper && ray build",
+    "publish": "bunx @raycast/api@latest publish",
+    "prepublishOnly": "echo \"\\n\\nThis extension is intended for the Raycast Store.\\n\\nUse \\`bun run publish\\` to publish it with Raycast.\\n\\n\" && exit 1"
+  },
+  "dependencies": {
+    "@raycast/api": "^1.103.0",
+    "@raycast/utils": "^2.2.1"
+  },
+  "devDependencies": {
+    "@raycast/eslint-config": "^2.0.4",
+    "@types/node": "22.19.17",
+    "@types/react": "19.0.10",
+    "eslint": "^9.22.0",
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.2"
+  },
+  "icon": "extension-icon.png",
+  "commands": [
+    {
+      "name": "open-quick-tasks",
+      "title": "Quick Tasks",
+      "description": "Just a quick interface for quick tasks using Apple Reminders",
+      "mode": "view"
+    }
+  ],
+  "title": "Quick Tasks",
+  "author": "nielsjaspers",
+  "platforms": [
+    "macOS"
+  ],
+  "categories": [
+    "Productivity"
+  ]
+}
