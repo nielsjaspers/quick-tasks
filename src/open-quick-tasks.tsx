@@ -22,12 +22,14 @@ type Reminder = {
 
 type Preferences = {
   defaultListName?: string;
+  sortOrder?: "newest" | "oldest";
 };
 
 const execFileAsync = promisify(execFile);
 const helperPath = join(environment.assetsPath, "quick-tasks-helper");
 const preferences = getPreferenceValues<Preferences>();
 const defaultListName = preferences.defaultListName?.trim();
+const sortOrder = preferences.sortOrder ?? "newest";
 
 function remindersAccessError(error: unknown): boolean {
   return (
@@ -61,7 +63,9 @@ async function runHelper(args: string[]): Promise<string> {
 
 async function fetchOpenReminders(): Promise<Reminder[]> {
   const output = await runHelper(
-    defaultListName ? ["list", defaultListName] : ["list"],
+    defaultListName
+      ? ["list", defaultListName, sortOrder]
+      : ["list", sortOrder],
   );
   return JSON.parse(output || "[]") as Reminder[];
 }

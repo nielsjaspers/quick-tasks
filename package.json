@@ -39,6 +39,24 @@
           "title": "Default List Name",
           "description": "Optional exact Apple Reminders list name. Leave empty to use Reminders' default list.",
           "placeholder": "Reminders"
+        },
+        {
+          "name": "sortOrder",
+          "type": "dropdown",
+          "required": false,
+          "title": "Sort Order",
+          "description": "Choose how open reminders are ordered.",
+          "default": "newest",
+          "data": [
+            {
+              "title": "Newest First",
+              "value": "newest"
+            },
+            {
+              "title": "Oldest First",
+              "value": "oldest"
+            }
+          ]
         }
       ]
     }

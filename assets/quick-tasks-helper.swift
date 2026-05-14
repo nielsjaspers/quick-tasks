@@ -16,6 +16,11 @@ struct ReminderOutput: Encodable {
   let title: String
 }
 
+enum SortOrder: String {
+  case newest
+  case oldest
+}
+
 let store = EKEventStore()
 
 func requestRemindersAccess() throws {
@@ -89,12 +94,18 @@ func incompleteReminders(listName: String?) throws -> [EKReminder] {
   return fetchedReminders ?? []
 }
 
-func listReminders(listName: String?) throws {
+func listReminders(listName: String?, sortOrder: SortOrder) throws {
   let reminders = try incompleteReminders(listName: listName)
     .sorted { first, second in
       let firstDate = first.creationDate ?? Date.distantPast
       let secondDate = second.creationDate ?? Date.distantPast
-      return firstDate > secondDate
+
+      switch sortOrder {
+      case .newest:
+        return firstDate > secondDate
+      case .oldest:
+        return firstDate < secondDate
+      }
     }
     .map { reminder in
       ReminderOutput(id: reminder.calendarItemIdentifier, title: reminder.title ?? "")
@@ -102,6 +113,24 @@ func listReminders(listName: String?) throws {
 
   let data = try JSONEncoder().encode(reminders)
   print(String(data: data, encoding: .utf8) ?? "[]")
+}
+
+func listArguments(_ arguments: [String]) -> (String?, SortOrder) {
+  let sortValues = Set([SortOrder.newest.rawValue, SortOrder.oldest.rawValue])
+
+  if arguments.count >= 4 {
+    return (arguments[2], SortOrder(rawValue: arguments[3]) ?? .newest)
+  }
+
+  if arguments.count >= 3 {
+    if sortValues.contains(arguments[2]) {
+      return (nil, SortOrder(rawValue: arguments[2]) ?? .newest)
+    }
+
+    return (arguments[2], .newest)
+  }
+
+  return (nil, .newest)
 }
 
 func addReminder(title: String, listName: String?) throws {
@@ -145,8 +174,8 @@ do {
 
   switch arguments[1] {
   case "list":
-    let listName = arguments.count >= 3 ? arguments[2] : nil
-    try listReminders(listName: listName)
+    let (listName, sortOrder) = listArguments(arguments)
+    try listReminders(listName: listName, sortOrder: sortOrder)
   case "add":
     guard arguments.count >= 3 else {
       throw QuickTasksError.missingTitle
