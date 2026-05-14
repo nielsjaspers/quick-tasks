@@ -6,6 +6,7 @@ import {
   Form,
   Icon,
   List,
+  LocalStorage,
   showToast,
   Toast,
   useNavigation,
@@ -30,6 +31,11 @@ const helperPath = join(environment.assetsPath, "quick-tasks-helper");
 const preferences = getPreferenceValues<Preferences>();
 const defaultListName = preferences.defaultListName?.trim();
 const defaultSortOrder = preferences.sortOrder ?? "newest";
+const SORT_ORDER_STORAGE_KEY = "sortOrder";
+
+function isSortOrder(value: unknown): value is "newest" | "oldest" {
+  return value === "newest" || value === "oldest";
+}
 
 function remindersAccessError(error: unknown): boolean {
   return (
@@ -195,6 +201,20 @@ export default function Command() {
     void refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    async function loadStoredSortOrder() {
+      const storedSortOrder = await LocalStorage.getItem<string>(
+        SORT_ORDER_STORAGE_KEY,
+      );
+
+      if (isSortOrder(storedSortOrder)) {
+        setSortOrder(storedSortOrder);
+      }
+    }
+
+    void loadStoredSortOrder();
+  }, []);
+
   const visibleReminders = useMemo(() => {
     if (!isSearchMode || !hasComposerText) {
       return reminders;
@@ -294,9 +314,12 @@ export default function Command() {
       icon={Icon.ArrowClockwise}
       shortcut={{ modifiers: ["cmd"], key: "b" }}
       onAction={() => {
-        setSortOrder((currentSortOrder) =>
-          currentSortOrder === "newest" ? "oldest" : "newest",
-        );
+        setSortOrder((currentSortOrder) => {
+          const nextSortOrder =
+            currentSortOrder === "newest" ? "oldest" : "newest";
+          void LocalStorage.setItem(SORT_ORDER_STORAGE_KEY, nextSortOrder);
+          return nextSortOrder;
+        });
       }}
     />
   );
