@@ -3,10 +3,12 @@ import {
   ActionPanel,
   environment,
   getPreferenceValues,
+  Form,
   Icon,
   List,
   showToast,
   Toast,
+  useNavigation,
 } from "@raycast/api";
 import { execFile } from "child_process";
 import { join } from "path";
@@ -72,6 +74,72 @@ async function createReminder(title: string): Promise<void> {
 
 async function completeReminder(id: string): Promise<void> {
   await runHelper(["complete", id]);
+}
+
+async function editReminder(id: string, title: string): Promise<void> {
+  await runHelper(["edit", id, title]);
+}
+
+type EditTaskFormValues = {
+  title: string;
+};
+
+function EditTaskForm({
+  reminder,
+  onEdited,
+}: {
+  reminder: Reminder;
+  onEdited: () => Promise<void>;
+}) {
+  const { pop } = useNavigation();
+  const [title, setTitle] = useState(reminder.title);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  async function submit(values: EditTaskFormValues) {
+    const nextTitle = values.title.trim();
+
+    if (!nextTitle || isSubmitting) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await editReminder(reminder.id, nextTitle);
+      await onEdited();
+      pop();
+    } catch (caughtError) {
+      const message = reminderErrorMessage(
+        caughtError,
+        "Could not edit the reminder.",
+      );
+      await showToast({ style: Toast.Style.Failure, title: message });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <Form
+      isLoading={isSubmitting}
+      actions={
+        <ActionPanel>
+          <Action.SubmitForm
+            title="Save Task"
+            icon={Icon.Check}
+            onSubmit={submit}
+          />
+        </ActionPanel>
+      }
+    >
+      <Form.TextField
+        id="title"
+        title="Task"
+        value={title}
+        onChange={setTitle}
+        autoFocus
+      />
+    </Form>
+  );
 }
 
 export default function Command() {
@@ -211,6 +279,15 @@ export default function Command() {
     />
   );
 
+  const editAction = (reminder: Reminder) => (
+    <Action.Push
+      title="Edit Task"
+      icon={Icon.Pencil}
+      shortcut={{ modifiers: ["cmd"], key: "r" }}
+      target={<EditTaskForm reminder={reminder} onEdited={refresh} />}
+    />
+  );
+
   return (
     <List
       isLoading={isLoading || isMutating}
@@ -239,20 +316,25 @@ export default function Command() {
             icon={Icon.Circle}
             actions={
               <ActionPanel>
-                <Action
-                  title="Complete Task"
-                  icon={Icon.CheckCircle}
-                  onAction={() => completeSelected(reminder.id)}
-                />
+                {isSearchMode || !hasComposerText ? (
+                  <Action
+                    title="Complete Task"
+                    icon={Icon.CheckCircle}
+                    onAction={() => completeSelected(reminder.id)}
+                  />
+                ) : (
+                  createAction
+                )}
                 {isSearchMode ? (
                   createAction
-                ) : (
+                ) : hasComposerText ? (
                   <Action
                     title="Complete Selected Task"
                     icon={Icon.CheckCircle}
                     onAction={() => completeSelected(reminder.id)}
                   />
-                )}
+                ) : undefined}
+                {editAction(reminder)}
                 {toggleSearchAction}
               </ActionPanel>
             }

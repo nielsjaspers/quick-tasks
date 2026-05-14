@@ -125,6 +125,17 @@ func completeReminder(id: String) throws {
   try store.save(reminder, commit: true)
 }
 
+func editReminder(id: String, title: String) throws {
+  try requestRemindersAccess()
+
+  guard let reminder = store.calendarItem(withIdentifier: id) as? EKReminder else {
+    throw QuickTasksError.reminderNotFound
+  }
+
+  reminder.title = title
+  try store.save(reminder, commit: true)
+}
+
 do {
   let arguments = CommandLine.arguments
 
@@ -147,6 +158,11 @@ do {
       throw QuickTasksError.missingIdentifier
     }
     try completeReminder(id: arguments[2])
+  case "edit":
+    guard arguments.count >= 4 else {
+      throw QuickTasksError.missingTitle
+    }
+    try editReminder(id: arguments[2], title: arguments[3])
   default:
     throw QuickTasksError.missingCommand
   }
