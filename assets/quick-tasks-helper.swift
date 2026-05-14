@@ -7,6 +7,7 @@ enum QuickTasksError: Error {
   case missingIdentifier
   case remindersAccessDenied
   case noDefaultList
+  case listNotFound(String)
   case reminderNotFound
 }
 
@@ -47,18 +48,28 @@ func requestRemindersAccess() throws {
   }
 }
 
-func defaultReminderCalendar() throws -> EKCalendar {
-  guard let calendar = store.defaultCalendarForNewReminders() else {
+func reminderCalendar(named listName: String?) throws -> EKCalendar {
+  if let listName, !listName.isEmpty {
+    guard let calendar = store
+      .calendars(for: .reminder)
+      .first(where: { $0.title == listName }) else {
+      throw QuickTasksError.listNotFound(listName)
+    }
+
+    return calendar
+  }
+
+  guard let defaultCalendar = store.defaultCalendarForNewReminders() else {
     throw QuickTasksError.noDefaultList
   }
 
-  return calendar
+  return defaultCalendar
 }
 
-func incompleteReminders() throws -> [EKReminder] {
+func incompleteReminders(listName: String?) throws -> [EKReminder] {
   try requestRemindersAccess()
 
-  let calendar = try defaultReminderCalendar()
+  let calendar = try reminderCalendar(named: listName)
   let predicate = store.predicateForIncompleteReminders(
     withDueDateStarting: nil,
     ending: nil,
@@ -78,8 +89,8 @@ func incompleteReminders() throws -> [EKReminder] {
   return fetchedReminders ?? []
 }
 
-func listReminders() throws {
-  let reminders = try incompleteReminders()
+func listReminders(listName: String?) throws {
+  let reminders = try incompleteReminders(listName: listName)
     .sorted { first, second in
       let firstDate = first.creationDate ?? Date.distantPast
       let secondDate = second.creationDate ?? Date.distantPast
@@ -93,11 +104,11 @@ func listReminders() throws {
   print(String(data: data, encoding: .utf8) ?? "[]")
 }
 
-func addReminder(title: String) throws {
+func addReminder(title: String, listName: String?) throws {
   try requestRemindersAccess()
 
   let reminder = EKReminder(eventStore: store)
-  reminder.calendar = try defaultReminderCalendar()
+  reminder.calendar = try reminderCalendar(named: listName)
   reminder.title = title
 
   try store.save(reminder, commit: true)
@@ -123,12 +134,14 @@ do {
 
   switch arguments[1] {
   case "list":
-    try listReminders()
+    let listName = arguments.count >= 3 ? arguments[2] : nil
+    try listReminders(listName: listName)
   case "add":
     guard arguments.count >= 3 else {
       throw QuickTasksError.missingTitle
     }
-    try addReminder(title: arguments[2])
+    let listName = arguments.count >= 4 ? arguments[3] : nil
+    try addReminder(title: arguments[2], listName: listName)
   case "complete":
     guard arguments.count >= 3 else {
       throw QuickTasksError.missingIdentifier

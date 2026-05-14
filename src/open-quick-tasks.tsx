@@ -2,6 +2,7 @@ import {
   Action,
   ActionPanel,
   environment,
+  getPreferenceValues,
   Icon,
   List,
   showToast,
@@ -17,8 +18,14 @@ type Reminder = {
   title: string;
 };
 
+type Preferences = {
+  defaultListName?: string;
+};
+
 const execFileAsync = promisify(execFile);
 const helperPath = join(environment.assetsPath, "quick-tasks-helper");
+const preferences = getPreferenceValues<Preferences>();
+const defaultListName = preferences.defaultListName?.trim();
 
 function remindersAccessError(error: unknown): boolean {
   return (
@@ -29,18 +36,38 @@ function remindersAccessError(error: unknown): boolean {
   );
 }
 
+function remindersListNotFoundError(error: unknown): boolean {
+  return String(error).toLowerCase().includes("listnotfound");
+}
+
+function reminderErrorMessage(error: unknown, fallback: string): string {
+  if (remindersAccessError(error)) {
+    return "Quick Tasks needs access to Apple Reminders to work.";
+  }
+
+  if (remindersListNotFoundError(error)) {
+    return "Quick Tasks could not find that Reminders list.";
+  }
+
+  return fallback;
+}
+
 async function runHelper(args: string[]): Promise<string> {
   const { stdout } = await execFileAsync(helperPath, args);
   return stdout.trim();
 }
 
 async function fetchOpenReminders(): Promise<Reminder[]> {
-  const output = await runHelper(["list"]);
+  const output = await runHelper(
+    defaultListName ? ["list", defaultListName] : ["list"],
+  );
   return JSON.parse(output || "[]") as Reminder[];
 }
 
 async function createReminder(title: string): Promise<void> {
-  await runHelper(["add", title]);
+  await runHelper(
+    defaultListName ? ["add", title, defaultListName] : ["add", title],
+  );
 }
 
 async function completeReminder(id: string): Promise<void> {
@@ -74,9 +101,10 @@ export default function Command() {
         return openReminders[0]?.id;
       });
     } catch (caughtError) {
-      const message = remindersAccessError(caughtError)
-        ? "Quick Tasks needs access to Apple Reminders to work."
-        : "Could not read Apple Reminders.";
+      const message = reminderErrorMessage(
+        caughtError,
+        "Could not read Apple Reminders.",
+      );
       setError(message);
       setReminders([]);
       await showToast({ style: Toast.Style.Failure, title: message });
@@ -111,9 +139,10 @@ export default function Command() {
       setSearchText("");
       await refresh();
     } catch (caughtError) {
-      const message = remindersAccessError(caughtError)
-        ? "Quick Tasks needs access to Apple Reminders to work."
-        : "Could not create the reminder.";
+      const message = reminderErrorMessage(
+        caughtError,
+        "Could not create the reminder.",
+      );
       await showToast({ style: Toast.Style.Failure, title: message });
     } finally {
       setIsMutating(false);
@@ -134,9 +163,10 @@ export default function Command() {
         );
         await refresh();
       } catch (caughtError) {
-        const message = remindersAccessError(caughtError)
-          ? "Quick Tasks needs access to Apple Reminders to work."
-          : "Could not complete the reminder.";
+        const message = reminderErrorMessage(
+          caughtError,
+          "Could not complete the reminder.",
+        );
         await showToast({ style: Toast.Style.Failure, title: message });
       } finally {
         setIsMutating(false);

@@ -30,7 +30,17 @@
       "name": "open-quick-tasks",
       "title": "Quick Tasks",
       "description": "Just a quick interface for quick tasks using Apple Reminders",
-      "mode": "view"
+      "mode": "view",
+      "preferences": [
+        {
+          "name": "defaultListName",
+          "type": "textfield",
+          "required": false,
+          "title": "Default List Name",
+          "description": "Optional exact Apple Reminders list name. Leave empty to use Reminders' default list.",
+          "placeholder": "Reminders"
+        }
+      ]
     }
   ],
   "title": "Quick Tasks",
