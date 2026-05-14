@@ -162,6 +162,9 @@ export default function Command() {
         setReminders((currentReminders) =>
           currentReminders.filter((reminder) => reminder.id !== id),
         );
+        if (isSearchMode) {
+          setSearchText("");
+        }
         await refresh();
       } catch (caughtError) {
         const message = reminderErrorMessage(
@@ -173,7 +176,7 @@ export default function Command() {
         setIsMutating(false);
       }
     },
-    [isMutating, refresh],
+    [isMutating, isSearchMode, refresh],
   );
 
   const selectedReminder = visibleReminders.find(
@@ -236,20 +239,16 @@ export default function Command() {
             icon={Icon.Circle}
             actions={
               <ActionPanel>
-                {isSearchMode ? (
-                  <Action
-                    title="Complete Task"
-                    icon={Icon.CheckCircle}
-                    onAction={() => completeSelected(reminder.id)}
-                  />
-                ) : (
-                  createAction
-                )}
+                <Action
+                  title="Complete Task"
+                  icon={Icon.CheckCircle}
+                  onAction={() => completeSelected(reminder.id)}
+                />
                 {isSearchMode ? (
                   createAction
                 ) : (
                   <Action
-                    title="Complete Task"
+                    title="Complete Selected Task"
                     icon={Icon.CheckCircle}
                     onAction={() => completeSelected(reminder.id)}
                   />
