@@ -1,6 +1,6 @@
 # Quick Tasks
 
-Quick Tasks is a minimal Raycast extension for Apple Reminders. It is built for fast capture and completion, closer to a tiny task inbox than a full reminders manager.
+Quick Tasks is a minimal Raycast extension for Apple Reminders. It is built for fast capture, completion, and quick recall, closer to a tiny task inbox than a full reminders manager.
 
 The extension has one command: `Quick Tasks`.
 
@@ -12,7 +12,15 @@ By default, the bar is a composer. Typing does not filter the list. Press `Enter
 
 The list shows incomplete reminders only. Selecting a task and pressing `Enter` completes it in Apple Reminders, then removes it from the list.
 
-Press `Cmd+F` to switch into search mode. In search mode, typing filters the open tasks. Press `Enter` to complete the selected task. If you want to create a new task from the search text instead, use `Cmd+Enter`.
+Press `Cmd+F` to switch into search mode. In search mode, typing filters the open tasks. Press `Enter` to complete the selected task. The create action is still available from the action panel when you want to turn the current text into a task instead of completing the selected one.
+
+Press `Cmd+Y` to switch to history. History shows completed reminders, supports search, and lets you restore a completed reminder back to open with `Enter`.
+
+Press `Cmd+R` on a selected reminder to edit its title.
+
+Press `Cmd+B` to toggle between newest first and oldest first. Quick Tasks remembers the last sort order you used.
+
+Press `Cmd+I` to insert `@ai ` into the composer when you want AI to split a longer prompt into multiple tasks.
 
 ## Reminders List
 
@@ -21,8 +29,13 @@ Quick Tasks uses Apple Reminders as the source of truth. It does not keep its ow
 By default, new tasks go to the Apple Reminders default list. You can change this in Raycast extension settings:
 
 - `Default List Name`: optional exact Apple Reminders list name
+- `Sort Order`: initial order for reminders, newest first or oldest first
 
 Leave it blank to keep using the Reminders default list.
+
+## AI Capture
+
+If a composer line starts with `@ai` or `@agent`, Quick Tasks asks Raycast AI to split the text into plain task titles and creates them as separate reminders.
 
 ## Development
 
